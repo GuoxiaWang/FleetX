@@ -322,6 +322,10 @@ class ViT(nn.Layer):
         zeros_(self.cls_token)
         self.apply(self._init_weights)
 
+        pretrained_configs = kwargs.pop('pretrained', None)
+        if pretrained_configs is not None:
+            self.load_pretrained(**pretrained_configs)
+
     def _init_weights(self, m):
         if isinstance(m, nn.LayerNorm):
             zeros_(m.bias)
@@ -347,22 +351,28 @@ class ViT(nn.Layer):
         x = self.head(x)
         return x
 
-    def load_pretrained(self, path, rank=0, finetune=False):
-        if not os.path.exists(path + '.pdparams'):
+    def load_pretrained(self, prefix_path, finetune=False):
+        if not os.path.exists(prefix_path + '.pdparams'):
             raise ValueError("Model pretrain path {} does not "
-                             "exists.".format(path))
+                             "exists.".format(prefix_path))
 
         state_dict = self.state_dict()
-        param_state_dict = paddle.load(path + ".pdparams")
+        param_state_dict = paddle.load(prefix_path + ".pdparams")
+
+        # for FP16 saving pretrained weight
+        for key, value in param_state_dict.items():
+            param_state_dict[key] = param_state_dict[key].astype(
+                paddle.float32)
+
         if not finetune:
             self.set_dict(param_state_dict)
             return
 
-        for k in ['head0.weight', 'head0.bias', 'head.weight', 'head.bias']:
-            if k in param_state_dict and param_state_dict[
-                    k].shape != state_dict[k].shape:
-                print(f"Removing key {k} from pretrained checkpoint")
-                del param_state_dict[k]
+        # print(f'Load {prefix_path} + .pdparams')
+        # for k in ['head0.weight', 'head0.bias', 'head.weight', 'head.bias']:
+        #     if k in param_state_dict:
+        #         print(f"Removing key {k} from pretrained checkpoint")
+        #         del param_state_dict[k]
 
         # interpolate position embedding
         pos_embed_checkpoint = param_state_dict['pos_embed']
@@ -381,11 +391,12 @@ class ViT(nn.Layer):
         pos_tokens = paddle.transpose(
             pos_tokens.reshape([-1, orig_size, orig_size, embedding_size]),
             perm=[0, 3, 1, 2])
+        dtype = pos_tokens.dtype
         pos_tokens = paddle.nn.functional.interpolate(
-            pos_tokens,
+            pos_tokens.astype(paddle.float32),
             size=(new_size, new_size),
             mode='bicubic',
-            align_corners=False)
+            align_corners=False).astype(dtype)
         pos_tokens = paddle.transpose(
             pos_tokens, perm=[0, 2, 3, 1]).flatten(1, 2)
         new_pos_embed = paddle.concat((extra_tokens, pos_tokens), axis=1)
@@ -393,9 +404,6 @@ class ViT(nn.Layer):
 
         self.set_dict(param_state_dict)
         return
-
-    def save(self, path, local_rank=0, rank=0):
-        paddle.save(self.state_dict(), path + ".pdparams")
 
 
 class ViTCELoss(nn.Layer):

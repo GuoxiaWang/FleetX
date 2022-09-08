@@ -72,32 +72,26 @@ class ViTModule(BasicModule):
         logger.info(f'Total parameters: {len(self.model.parameters())}')
 
     def configure_optimizers(self):
-        self.decay_fused_tensors, self.all_fused_tensors = None, None
 
-        opt_configs = self.configs['Optimizer']
+        opt_configs = copy.deepcopy(self.configs['Optimizer'])
 
-        lr_configs = copy.deepcopy(self.configs['Optimizer']['lr'])
+        lr_configs = opt_configs.pop('lr')
         lr_scheduler = lr.ViTLRScheduler(**lr_configs)
 
-        clip = paddle.nn.ClipGradByGlobalNorm(clip_norm=opt_configs[
-            'grad_clip']) if 'grad_clip' in opt_configs and opt_configs[
-                'grad_clip'] > 0 else None
+        grad_clip = opt_configs.pop('grad_clip', None)
 
-        # Generate parameter names needed to perform weight decay.
-        # All bias and LayerNorm parameters are excluded.
+        if grad_clip is not None:
+            grad_clip = paddle.nn.ClipGradByGlobalNorm(clip_norm=grad_clip)
 
-        optimizer = paddle.optimizer.AdamW(
+        optim_name = opt_configs.pop('name')
+
+        optimizer = eval(f'paddle.optimizer.{optim_name}')(
             learning_rate=lr_scheduler,
-            beta1=opt_configs['adam_beta1'],
-            beta2=opt_configs['adam_beta2'],
-            epsilon=opt_configs['adam_epsilon'],
-            parameters=self.all_fused_tensors
-            if self.configs['Fused']['tensor_fusion'] else
-            self.model.parameters(),
-            weight_decay=opt_configs['weight_decay'],
-            grad_clip=clip,
+            parameters=self.model.parameters(),
+            grad_clip=grad_clip,
             multi_precision=self.configs['Engine']['mix_precision'][
-                'use_pure_fp16'])
+                'use_pure_fp16'],
+            **opt_configs, )
         return optimizer, lr_scheduler
 
     def forward(self, inputs):

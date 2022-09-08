@@ -38,11 +38,11 @@ Model:
   use_recompute: Fasle
 
 Optimizer:
-  # name: AdamW
+  name: AdamW
   weight_decay: 0.03
-  adam_beta1: 0.9
-  adam_beta2: 0.999
-  adam_epsilon: 1.0e-8
+  beta1: 0.9
+  beta2: 0.999
+  epsilon: 1.0e-8
   lr:
     learning_rate: 0.001
     decay_type: linear
